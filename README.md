@@ -105,7 +105,7 @@ tab and the Snapshot tab's extra columns.
   `GSCI_VOL_SOURCE` in the file): a fixed-maturity continuation like
   price_ric back-tested (2026-08-28) as understating realized vol ~12% on
   average vs. a roll-managed series, so vol is sourced instead from Rollex
-  (the 4 ICE softs — the actively-maintained `Interim_Migration/Rollex`
+  (the 4 ICE softs — the actively-maintained `LSEG/Rollex`
   build, NOT the stale legacy one under `ICEBREAKER/Rollex`) or the S&P
   GSCI single-commodity sub-index (the other 9, e.g. `.SPGSKCP` for
   Coffee). Using a different series than Price for vol is fine since vol

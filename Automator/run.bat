@@ -1,7 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 
-set REPO=C:\Users\virat.arya\ETG\SoftsDatabase - Documents\Database\Hardmine\Interim_Migration\Index
+set REPO=C:\Users\virat.arya\ETG\SoftsDatabase - Documents\Database\Hardmine\LSEG\Index
 set LOG=%REPO%\Automator\run_log.txt
 set SCRIPT=%REPO%\Code\ingest_lseg.py
 set MAILER=%REPO%\Automator\send_mail.py

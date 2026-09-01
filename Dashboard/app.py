@@ -113,7 +113,7 @@ def compute_daily_vol(daily_df: pd.DataFrame) -> pd.DataFrame:
     commodity — same methodology as COT_ALL's Spec VaR (_build_var_df in
     cot_app.py). Deliberately NOT sourced from the same price_ric series as
     the $ Price column: ingest_lseg.py feeds this from Rollex (the 4 ICE
-    softs — the actively-maintained Interim_Migration/Rollex build) or the
+    softs — the actively-maintained LSEG/Rollex build) or the
     S&P GSCI single-commodity sub-index (the other 9) instead — a fixed-
     maturity continuation like price_ric back-tested (2026-08-28) as
     understating realized vol by ~12% on average vs. either of those roll-

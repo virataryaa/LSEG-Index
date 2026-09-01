@@ -164,14 +164,14 @@ FETCH_BACKOFF = 5
 # than the $ Price column without creating a Price/Vol mismatch:
 #   - The 4 ICE-softs also covered by our OWN Rollex builder (roll-adjusted,
 #     already verified near-identical vol to GSCI's own sub-index in the
-#     same backtest) — read locally from the Interim_Migration/Rollex
+#     same backtest) — read locally from the LSEG/Rollex
 #     project, whose own LSEG automator keeps it current daily (verified
 #     2026-08-28: through the SAME day as this ingest ran). NOTE: there is
 #     also a legacy, no-longer-updated Rollex build under ICEBREAKER/Rollex
 #     (~1 month stale as of this check) — do NOT point at that one.
 #   - The other 9 (no Rollex equivalent) — the S&P GSCI single-commodity
 #     sub-index RIC instead (verified live 2026-08-28, all 9 accessible).
-ROLLEX_DIR = Path(r"C:\Users\virat.arya\ETG\SoftsDatabase - Documents\Database\Hardmine\Interim_Migration\Rollex\Database")
+ROLLEX_DIR = Path(r"C:\Users\virat.arya\ETG\SoftsDatabase - Documents\Database\Hardmine\LSEG\Rollex\Database")
 ROLLEX_VOL_SOURCE = {
     "COTTON": "rollex_CT.parquet",
     "COCOA":  "rollex_CC.parquet",
