@@ -858,7 +858,7 @@ with tab_should:
     dev_basis = st.radio(
         "Compare actual $ against",
         ["Live Pool % (today's total)", "Start-of-Year $ Target (frozen)"],
-        horizontal=True, key="dev_basis",
+        index=1, horizontal=True, key="dev_basis",
         help=("'Live Pool %' (the original method) measures each commodity's share of "
               "TODAY's total Ags index value against its target %. Problem: a commodity "
               "can look under/over-weight purely because the OVERALL index grew or shrank "
