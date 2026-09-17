@@ -29,6 +29,32 @@ st.markdown("""<style>
   .block-container{padding-top:2rem!important;padding-bottom:1.5rem;max-width:1440px}
   hr{border:none!important;border-top:1px solid #e8e8ed!important;margin:.4rem 0!important}
   h1,h2,h3{color:#1d1d1f!important;font-weight:500!important}
+
+  /* Pill-style segmented controls — replaces the plain st.tabs nav and every
+     st.radio filter (Group, View, Vol Window, etc.) with rounded button
+     groups, active choice highlighted navy. Scoped to any widget with an
+     explicit key (all our segmented_control calls have one) so it never
+     touches sliders/multiselects that also carry a st-key- class. */
+  [class*="st-key-"] [data-testid="stButtonGroup"] { gap:0; }
+  [class*="st-key-"] [data-testid="stButtonGroup"] > div {
+      display:inline-flex; gap:4px; padding:4px; background:#f1f3f7;
+      border:1px solid #e3e7ee; border-radius:999px;
+  }
+  [class*="st-key-"] button[kind^="segmented_control"] {
+      border:none !important; border-radius:999px !important; margin:0 !important;
+      padding:.35rem 1.25rem !important; min-height:0 !important;
+      background:transparent !important; box-shadow:none !important;
+      transition:background .15s ease, color .15s ease;
+  }
+  [class*="st-key-"] button[kind^="segmented_control"] p {
+      font-size:.84rem !important; font-weight:600 !important; letter-spacing:.02em;
+      color:#5b6472 !important;
+  }
+  [class*="st-key-"] button[kind="segmented_control"]:hover { background:#e6e9f0 !important; }
+  [class*="st-key-"] button[kind="segmented_controlActive"] {
+      background:#1a56cc !important; box-shadow:0 1px 3px rgba(0,0,0,.18) !important;
+  }
+  [class*="st-key-"] button[kind="segmented_controlActive"] p { color:#ffffff !important; }
 </style>""", unsafe_allow_html=True)
 
 _D = dict(template="plotly_white", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
@@ -46,6 +72,13 @@ def base_fig(height=380, yaxis_title=None):
                        legend=dict(orientation="h", y=1.05, font=dict(size=9)),
                        margin=dict(t=10, b=10, l=4, r=4), **_D)
     return fig
+
+def seg_control(label, options, default, key, **kwargs):
+    """st.segmented_control wrapper that falls back to `default` if the user
+    clicks the active pill again — unlike st.radio, segmented_control allows
+    deselecting down to None in single-select mode."""
+    val = st.segmented_control(label, options, default=default, key=key, **kwargs)
+    return default if val is None else val
 
 GROUPS = {
     "Softs":     ["COTTON", "COCOA", "SUGAR", "COFFEE"],
@@ -686,24 +719,31 @@ with st.sidebar:
     st.caption(f"BCOM weight: {100 - gsci_pct}%")
 blend_ratio = gsci_pct / 100
 
-tab_snapshot, tab_is, tab_should, tab_var, tab_detail, tab_rebalance, tab_weights = st.tabs(
-    ["Snapshot", "Positioning Over Time", "Deviation vs Target", "Risk (VaR)",
-     "Commodity COT Detail", "Annual Rebalance", "Target Weights (Reference)"]
-)
+NAV_OPTIONS = ["Snapshot", "Positioning Over Time", "Deviation vs Target", "Risk (VaR)",
+               "Commodity COT Detail", "Annual Rebalance", "Target Weights (Reference)"]
+nav = st.segmented_control("Navigation", NAV_OPTIONS, default=NAV_OPTIONS[0],
+                           key="nav_main", label_visibility="collapsed")
+if nav is None:  # segmented_control allows deselecting the active pill — fall back to Snapshot
+    nav = NAV_OPTIONS[0]
+
+# snap/snap_total computed unconditionally (not just inside the Snapshot nav
+# branch) — Annual Rebalance also needs them, and with st.tabs (the old nav)
+# every tab body ran on every script rerun so this cross-section dependency
+# was invisible; with if-branch nav dispatch it must be computed up front.
+snap = df[df["Date"] == max_date].copy()
+snap_total = snap["Nominal Net USD"].sum(skipna=True)
+snap["Actual Weight Pct"] = snap["Nominal Net USD"] / snap_total * 100
+snap["Target Weight Pct"] = snap["GSCI Weight Pct"] * blend_ratio + snap["BCOM Weight Pct"] * (1 - blend_ratio)
+snap["Deviation Pp"] = snap["Actual Weight Pct"] - snap["Target Weight Pct"]
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SNAPSHOT — target vs actual weight (bar) + one master table, every
 # commodity's index-leg vitals side by side, at the latest date
 # ══════════════════════════════════════════════════════════════════════════════
-with tab_snapshot:
+if nav == "Snapshot":
     st.markdown(lbl(f"Composition vs Target — {max_date.strftime('%d %b %Y')}"), unsafe_allow_html=True)
-    snap = df[df["Date"] == max_date].copy()
-    snap_total = snap["Nominal Net USD"].sum(skipna=True)
-    snap["Actual Weight Pct"] = snap["Nominal Net USD"] / snap_total * 100
-    snap["Target Weight Pct"] = snap["GSCI Weight Pct"] * blend_ratio + snap["BCOM Weight Pct"] * (1 - blend_ratio)
-    snap["Deviation Pp"] = snap["Actual Weight Pct"] - snap["Target Weight Pct"]
 
-    bar_level = st.radio("View", ["By Commodity", "By Group"], horizontal=True, key="snap_bar_level")
+    bar_level = seg_control("View", ["By Commodity", "By Group"], "By Commodity", "snap_bar_level")
     if bar_level == "By Group":
         snap["Group"] = snap["Commodity"].map(GROUP_OF)
         bar_src = snap.groupby("Group")[["Target Weight Pct", "Actual Weight Pct"]].sum()
@@ -744,7 +784,7 @@ with tab_snapshot:
 # no code change needed for a full year. Until announced, edit freely to
 # try scenarios.
 # ══════════════════════════════════════════════════════════════════════════════
-with tab_rebalance:
+if nav == "Annual Rebalance":
     year_from, year_to = max_date.year, max_date.year + 1
     st.markdown(lbl(f"Annual Rebalance Simulator — {year_from} → {year_to}"), unsafe_allow_html=True)
 
@@ -800,7 +840,7 @@ with tab_rebalance:
 # ══════════════════════════════════════════════════════════════════════════════
 # WHAT IT IS — actual positioning over time, no target comparison
 # ══════════════════════════════════════════════════════════════════════════════
-with tab_is:
+if nav == "Positioning Over Time":
     c1, c2 = st.columns(2)
     with c1:
         st.markdown(lbl("Total Ags Net Index — USD"), unsafe_allow_html=True)
@@ -840,8 +880,8 @@ with tab_is:
 
     st.markdown(lbl("What's Driving the Nominal $ Change — Position vs Price"), unsafe_allow_html=True)
     lookback_opts = {"1 Week": 1, "4 Weeks": 4, "13 Weeks (Quarter)": 13, "52 Weeks (1 Year)": 52}
-    lookback_label = st.radio(
-        "Lookback", list(lookback_opts.keys()), index=1, horizontal=True, key="attr_lookback",
+    lookback_label = seg_control(
+        "Lookback", list(lookback_opts.keys()), "4 Weeks", "attr_lookback",
         help=("Splits the $ change into a Position part (lots changing) and a Price part "
               "(price moving), using the average price and average lots over the period so "
               "both parts always add up exactly to the total. This is the Bennet decomposition."),
@@ -853,12 +893,12 @@ with tab_is:
 # ══════════════════════════════════════════════════════════════════════════════
 # WHAT IT SHOULD BE — actual positioning vs the GSCI/BCOM target weight
 # ══════════════════════════════════════════════════════════════════════════════
-with tab_should:
+if nav == "Deviation vs Target":
     st.markdown("**Deviation basis**")
-    dev_basis = st.radio(
+    dev_basis = seg_control(
         "Compare actual $ against",
         ["Live Pool % (today's total)", "Start-of-Year $ Target (frozen)"],
-        index=1, horizontal=True, key="dev_basis",
+        "Start-of-Year $ Target (frozen)", "dev_basis",
         help=("'Live Pool %' (the original method) measures each commodity's share of "
               "TODAY's total Ags index value against its target %. Problem: a commodity "
               "can look under/over-weight purely because the OVERALL index grew or shrank "
@@ -875,8 +915,8 @@ with tab_should:
 
     st.markdown(lbl("Over / Under vs Target Weight (in lots)"), unsafe_allow_html=True)
     default_sel = [c for c in GROUPS["Softs"] if c in all_commodities]
-    sel_group = st.radio("Group", ["Softs", "Grains", "Oilseeds", "Livestock", "Custom"],
-                         horizontal=True, key="trend_group")
+    sel_group = seg_control("Group", ["Softs", "Grains", "Oilseeds", "Livestock", "Custom"],
+                            "Softs", "trend_group")
     if sel_group == "Custom":
         sel_commodities = st.multiselect("Commodities", all_commodities, default=default_sel, key="trend_custom")
     else:
@@ -899,8 +939,8 @@ with tab_should:
     st.plotly_chart(fig_dev, use_container_width=True)
 
     st.markdown(lbl("Over / Under vs Target Weight (in VaR $)"), unsafe_allow_html=True)
-    devvar_window = st.radio("Vol Window", [20, 60, 120], horizontal=True,
-                             format_func=lambda x: f"{x}D", key="devvar_window")
+    devvar_window = seg_control("Vol Window", [20, 60, 120], 20, "devvar_window",
+                                format_func=lambda x: f"{x}D")
     daily_px_dev = load_daily_prices()
     vol_df_dev = compute_daily_vol(daily_px_dev)
     var_df_dev = compute_index_var(df, vol_df_dev, all_commodities, devvar_window)
@@ -942,7 +982,7 @@ with tab_should:
 # so the per-calendar-year weights driving every deviation calc are visible
 # and auditable on their own, not buried in an expander.
 # ══════════════════════════════════════════════════════════════════════════════
-with tab_weights:
+if nav == "Target Weights (Reference)":
     st.markdown(lbl(f"GSCI/BCOM Target Weight — by Year  ·  {gsci_pct}% GSCI / {100 - gsci_pct}% BCOM"),
                unsafe_allow_html=True)
     st.caption(f"{gsci_pct}% S&P GSCI RPDW + {100 - gsci_pct}% Bloomberg BCOM Target Weight (adjust "
@@ -975,19 +1015,19 @@ with tab_weights:
 # active Spec risk can be compared on the same $-risk scale, not just by
 # raw lots or notional $ (which ignore how volatile each market is).
 # ══════════════════════════════════════════════════════════════════════════════
-with tab_var:
+if nav == "Risk (VaR)":
     st.latex(r"\text{Net VaR} = \text{Net Lots} \times \text{Price} \times \text{Multiplier} \times \sigma_{\text{daily}} \times Z_{99\%}")
     st.caption("σ = realized daily volatility (rolling 20/60/120D std of daily returns), Z₉₉% = 2.3263 (1-day, 99% one-tailed confidence)")
 
     daily_px = load_daily_prices()
     vol_df = compute_daily_vol(daily_px)
-    vol_window = st.radio("Vol Window", [20, 60, 120], horizontal=True,
-                          format_func=lambda x: f"{x}D", key="var_window")
+    vol_window = seg_control("Vol Window", [20, 60, 120], 20, "var_window",
+                             format_func=lambda x: f"{x}D")
     var_df = compute_index_var(df, vol_df, all_commodities, vol_window)
     var_latest = var_df[var_df["Date"] == var_df.groupby("Commodity")["Date"].transform("max")]
 
     st.markdown(lbl(f"Net VaR ($M) — all 13 commodities, {vol_window}D vol"), unsafe_allow_html=True)
-    var_bar_level = st.radio("View", ["By Commodity", "By Group"], horizontal=True, key="var_bar_level")
+    var_bar_level = seg_control("View", ["By Commodity", "By Group"], "By Commodity", "var_bar_level")
     vl = var_latest.copy()
     vl["Net VaR M"] = vl["Net VaR USD"] / 1e6
     if var_bar_level == "By Group":
@@ -1016,8 +1056,8 @@ with tab_var:
 
     st.markdown(lbl("Net VaR ($M) Over Time"), unsafe_allow_html=True)
     default_sel_var = [c for c in GROUPS["Softs"] if c in all_commodities]
-    sel_group_var = st.radio("Group", ["Softs", "Grains", "Oilseeds", "Livestock", "Custom"],
-                             horizontal=True, key="var_group")
+    sel_group_var = seg_control("Group", ["Softs", "Grains", "Oilseeds", "Livestock", "Custom"],
+                                "Softs", "var_group")
     if sel_group_var == "Custom":
         sel_commodities_var = st.multiselect("Commodities", all_commodities, default=default_sel_var, key="var_custom")
     else:
@@ -1036,7 +1076,7 @@ with tab_var:
 # ══════════════════════════════════════════════════════════════════════════════
 # PER-COMMODITY DETAIL
 # ══════════════════════════════════════════════════════════════════════════════
-with tab_detail:
+if nav == "Commodity COT Detail":
     comm_pick = st.selectbox("Commodity", all_commodities, key="detail_comm")
     d = df[df["Commodity"] == comm_pick].set_index("Date")
 
