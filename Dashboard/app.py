@@ -191,6 +191,22 @@ def target_weight_pivot(df: pd.DataFrame, cols: list, blend_ratio: float) -> pd.
     return gsci * blend_ratio + bcom * (1 - blend_ratio)
 
 @st.cache_data(ttl=1800)
+def frozen_year_start_pool(total_pool: pd.Series) -> pd.Series:
+    """total_pool re-based to a single frozen $ value per calendar year — the
+    Total Ags Nominal on the FIRST available date of that year, held flat
+    across every other date in the same year (Romain's 2026-09-17 ask). Used
+    as the alternative denominator for compute_deviation()/
+    compute_weekly_deviation_pct(): with the live total_pool, a commodity
+    that hasn't traded at all can still show up as 'underweight' purely
+    because the OVERALL index grew (other commodities added $ or rallied).
+    Freezing the denominator at its Jan level isolates each commodity's own
+    drift toward/away from its $ target from that index-wide noise — e.g. if
+    Cocoa's 5% target on a $100Bil Jan-1 index is a $5Bil bogey, this basis
+    keeps comparing Cocoa's actual $ against that fixed $5Bil all year,
+    instead of against 5% of whatever the index is worth today."""
+    return total_pool.groupby(total_pool.index.year).transform("first")
+
+@st.cache_data(ttl=1800)
 def compute_deviation(df: pd.DataFrame, pool: pd.DataFrame, total_pool: pd.Series,
                        all_commodities: list, blend_ratio: float) -> pd.DataFrame:
     """Verified against the source workbook's RECAP sheet — target weight is
@@ -835,6 +851,25 @@ with tab_is:
 # WHAT IT SHOULD BE — actual positioning vs the GSCI/BCOM target weight
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_should:
+    st.markdown("**Deviation basis**")
+    dev_basis = st.radio(
+        "Compare actual $ against",
+        ["Live Pool % (today's total)", "Start-of-Year $ Target (frozen)"],
+        horizontal=True, key="dev_basis",
+        help=("'Live Pool %' (the original method) measures each commodity's share of "
+              "TODAY's total Ags index value against its target %. Problem: a commodity "
+              "can look under/over-weight purely because the OVERALL index grew or shrank "
+              "— even if that commodity itself never traded. 'Start-of-Year $ Target' "
+              "freezes the denominator at the total pool's value on the first trading day "
+              "of the year, so each commodity is compared against a fixed $ bogey "
+              "(Target % x Jan-1 Total Pool) all year — isolating that commodity's own "
+              "drift from index-wide noise. Romain's ask, 2026-09-17."),
+    )
+    total_pool_ref = frozen_year_start_pool(total_pool) if dev_basis.startswith("Start-of-Year") else total_pool
+    st.caption("Deviation below is vs. " +
+              ("a $ target frozen at each year's Jan level." if dev_basis.startswith("Start-of-Year")
+               else "target % of today's live total pool (default)."))
+
     st.markdown(lbl("Over / Under vs Target Weight (in lots)"), unsafe_allow_html=True)
     default_sel = [c for c in GROUPS["Softs"] if c in all_commodities]
     sel_group = st.radio("Group", ["Softs", "Grains", "Oilseeds", "Livestock", "Custom"],
@@ -844,7 +879,7 @@ with tab_should:
     else:
         sel_commodities = [c for c in GROUPS[sel_group] if c in all_commodities]
 
-    dev_df = compute_deviation(df, pool, total_pool, all_commodities, blend_ratio)
+    dev_df = compute_deviation(df, pool, total_pool_ref, all_commodities, blend_ratio)
     fig_dev = base_fig(height=420, yaxis_title="Deviation from Target Weight (lots)")
     for comm in sel_commodities:
         s = dev_df[dev_df["Commodity"] == comm].set_index("Date")["Deviation Lots"]
@@ -884,7 +919,7 @@ with tab_should:
                    unsafe_allow_html=True)
 
     st.markdown(lbl("Weekly Deviation vs Target Weight (percentage points)"), unsafe_allow_html=True)
-    weekly_dev = compute_weekly_deviation_pct(df, pool, total_pool, all_commodities, blend_ratio)
+    weekly_dev = compute_weekly_deviation_pct(df, pool, total_pool_ref, all_commodities, blend_ratio)
     n_weeks = st.slider("Weeks shown", min_value=8, max_value=min(104, len(weekly_dev)),
                         value=min(52, len(weekly_dev)), step=4, key="trend_weeks")
     st.markdown(build_weekly_deviation_html(weekly_dev.tail(n_weeks), all_commodities, GROUP_OF),
