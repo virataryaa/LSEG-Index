@@ -37,18 +37,18 @@ st.markdown("""<style>
      touches sliders/multiselects that also carry a st-key- class. */
   [class*="st-key-"] [data-testid="stButtonGroup"] { gap:0; }
   [class*="st-key-"] [data-testid="stButtonGroup"] > div {
-      display:inline-flex; gap:4px; padding:4px; background:#f1f3f7;
+      display:inline-flex; gap:2px; padding:3px; background:#f1f3f7;
       border:1px solid #e3e7ee; border-radius:999px;
   }
   [class*="st-key-"] button[kind^="segmented_control"] {
       border:none !important; border-radius:999px !important; margin:0 !important;
-      padding:.35rem 1.25rem !important; min-height:0 !important;
+      padding:.2rem .65rem !important; min-height:0 !important;
       background:transparent !important; box-shadow:none !important;
       transition:background .15s ease, color .15s ease;
   }
   [class*="st-key-"] button[kind^="segmented_control"] p {
-      font-size:.84rem !important; font-weight:600 !important; letter-spacing:.02em;
-      color:#5b6472 !important;
+      font-size:.74rem !important; font-weight:600 !important; letter-spacing:.01em;
+      color:#5b6472 !important; white-space:nowrap;
   }
   [class*="st-key-"] button[kind="segmented_control"]:hover { background:#e6e9f0 !important; }
   [class*="st-key-"] button[kind="segmented_controlActive"] {
@@ -899,14 +899,6 @@ if nav == "Deviation vs Target":
         "Compare actual $ against",
         ["Live Pool % (today's total)", "Start-of-Year $ Target (frozen)"],
         "Start-of-Year $ Target (frozen)", "dev_basis",
-        help=("'Live Pool %' (the original method) measures each commodity's share of "
-              "TODAY's total Ags index value against its target %. Problem: a commodity "
-              "can look under/over-weight purely because the OVERALL index grew or shrank "
-              "— even if that commodity itself never traded. 'Start-of-Year $ Target' "
-              "freezes the denominator at the total pool's value on the first trading day "
-              "of the year, so each commodity is compared against a fixed $ bogey "
-              "(Target % x Jan-1 Total Pool) all year — isolating that commodity's own "
-              "drift from index-wide noise. Romain's ask, 2026-09-17."),
     )
     total_pool_ref = frozen_year_start_pool(total_pool) if dev_basis.startswith("Start-of-Year") else total_pool
     st.caption("Deviation below is vs. " +
