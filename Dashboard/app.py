@@ -204,7 +204,10 @@ def frozen_year_start_pool(total_pool: pd.Series) -> pd.Series:
     Cocoa's 5% target on a $100Bil Jan-1 index is a $5Bil bogey, this basis
     keeps comparing Cocoa's actual $ against that fixed $5Bil all year,
     instead of against 5% of whatever the index is worth today."""
-    return total_pool.groupby(total_pool.index.year).transform("first")
+    def _first_valid(s: pd.Series) -> pd.Series:
+        v = s.dropna()
+        return pd.Series(v.iloc[0] if len(v) else np.nan, index=s.index)
+    return total_pool.groupby(total_pool.index.year).transform(_first_valid)
 
 @st.cache_data(ttl=1800)
 def compute_deviation(df: pd.DataFrame, pool: pd.DataFrame, total_pool: pd.Series,
