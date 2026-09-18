@@ -223,6 +223,16 @@ def target_weight_pivot(df: pd.DataFrame, cols: list, blend_ratio: float) -> pd.
     bcom = df.pivot_table(index="Date", columns="Commodity", values="BCOM Weight Pct", aggfunc="last")[cols]
     return gsci * blend_ratio + bcom * (1 - blend_ratio)
 
+def _year_start_freeze(s: pd.Series) -> pd.Series:
+    """Re-bases a Date-indexed $ series to a single frozen value per calendar
+    year — its own FIRST valid (non-NaN) reading of that year, held flat
+    across every other date in the same year. Shared building block for the
+    two 'reset at rebalance' deviation bases below."""
+    def _first_valid(g: pd.Series) -> pd.Series:
+        v = g.dropna()
+        return pd.Series(v.iloc[0] if len(v) else np.nan, index=g.index)
+    return s.groupby(s.index.year).transform(_first_valid)
+
 @st.cache_data(ttl=1800)
 def frozen_year_start_pool(total_pool: pd.Series) -> pd.Series:
     """total_pool re-based to a single frozen $ value per calendar year — the
@@ -237,10 +247,50 @@ def frozen_year_start_pool(total_pool: pd.Series) -> pd.Series:
     Cocoa's 5% target on a $100Bil Jan-1 index is a $5Bil bogey, this basis
     keeps comparing Cocoa's actual $ against that fixed $5Bil all year,
     instead of against 5% of whatever the index is worth today."""
-    def _first_valid(s: pd.Series) -> pd.Series:
-        v = s.dropna()
-        return pd.Series(v.iloc[0] if len(v) else np.nan, index=s.index)
-    return total_pool.groupby(total_pool.index.year).transform(_first_valid)
+    return _year_start_freeze(total_pool)
+
+@st.cache_data(ttl=1800)
+def compute_deviation_since_rebalance(df: pd.DataFrame, pool: pd.DataFrame,
+                                       all_commodities: list) -> pd.DataFrame:
+    """A THIRD, different question from compute_deviation()/target-weight
+    deviation: not 'how far is this commodity from its target %', but 'how
+    much has this commodity's OWN $ position moved since the last (Jan)
+    rebalance' — zeroes every commodity's book at its own first reading of
+    the calendar year, then tracks the $/lots change from that reset point.
+    No GSCI/BCOM target % involved at all here — pure flow since rebalance,
+    so unlike the other two bases, it's zero at every year's start BY
+    CONSTRUCTION (2026-09-18 ask)."""
+    cols = [c for c in all_commodities if c in pool.columns]
+    price = df.pivot_table(index="Date", columns="Commodity", values="Price", aggfunc="last")[cols]
+    oi = df.pivot_table(index="Date", columns="Commodity", values="Total OI", aggfunc="last")[cols]
+    ref = df.drop_duplicates("Commodity").set_index("Commodity")
+    multiplier = ref["Multiplier"].reindex(cols)
+
+    year_start = pool[cols].apply(_year_start_freeze)
+    dev_usd = pool[cols] - year_start
+    dev_lots = dev_usd / price.mul(multiplier, axis=1)
+    dev_pct_oi = dev_lots.div(oi) * 100
+
+    frames = []
+    for c in cols:
+        frames.append(pd.DataFrame({
+            "Commodity": c, "Date": dev_usd.index,
+            "Deviation USD": dev_usd[c].values,
+            "Deviation Lots": dev_lots[c].values,
+            "Deviation Pct OI": dev_pct_oi[c].values,
+        }))
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+@st.cache_data(ttl=1800)
+def compute_weekly_usd_since_rebalance(pool: pd.DataFrame, all_commodities: list) -> pd.DataFrame:
+    """$ version of compute_deviation_since_rebalance(), for the weekly
+    table — $ change in each commodity's own position vs its own
+    start-of-year level. Uses $ rather than % on purpose: % change from a
+    near-zero starting base blows up toward +/-infinity, while $ change from
+    $0 is just a normal, well-defined number (e.g. '+$2M', not '+inf%')."""
+    cols = [c for c in all_commodities if c in pool.columns]
+    year_start = pool[cols].apply(_year_start_freeze)
+    return pool[cols] - year_start
 
 @st.cache_data(ttl=1800)
 def compute_deviation(df: pd.DataFrame, pool: pd.DataFrame, total_pool: pd.Series,
@@ -383,7 +433,7 @@ def _diverging_cell_style(v, vmax) -> str:
         lo, hi, color = 50 - half, 50, "rgba(220,38,38,0.28)"
     return f"background:linear-gradient(to right, transparent {lo:.1f}%, {color} {lo:.1f}%, {color} {hi:.1f}%, transparent {hi:.1f}%);"
 
-def build_weekly_deviation_html(dev_tail: pd.DataFrame, commodities: list, group_of: dict) -> str:
+def build_weekly_deviation_html(dev_tail: pd.DataFrame, commodities: list, group_of: dict, fmt: str = "pct") -> str:
     css = """<style>
       .idxdev-wrap{overflow:auto;max-height:640px;border:1px solid #e5e7eb;border-radius:6px}
       table.idxdev{border-collapse:collapse;width:100%;font-size:.72rem;
@@ -418,7 +468,8 @@ def build_weekly_deviation_html(dev_tail: pd.DataFrame, commodities: list, group
             else:
                 style = _diverging_cell_style(v, vmax[c])
                 color = "#16a34a" if v >= 0 else "#dc2626"
-                cells.append(f"<td class='{cls}' style='{style}color:{color};font-weight:600'>{v:+.2f}</td>")
+                text = f"${v/1e6:+,.1f}M" if fmt == "usd_m" else f"{v:+.2f}"
+                cells.append(f"<td class='{cls}' style='{style}color:{color};font-weight:600'>{text}</td>")
             prev_grp = grp
         body_rows.append("<tr>" + "".join(cells) + "</tr>")
 
@@ -895,17 +946,31 @@ if nav == "Positioning Over Time":
 # ══════════════════════════════════════════════════════════════════════════════
 if nav == "Deviation vs Target":
     st.markdown("**Deviation basis**")
+    DEV_BASIS_OPTIONS = ["Live Pool % (today's total)", "Start-of-Year $ Target (frozen)",
+                         "Change Since Rebalance (own $ flow)"]
     dev_basis = seg_control(
-        "Compare actual $ against",
-        ["Live Pool % (today's total)", "Start-of-Year $ Target (frozen)"],
+        "Compare actual $ against", DEV_BASIS_OPTIONS,
         "Start-of-Year $ Target (frozen)", "dev_basis",
     )
-    total_pool_ref = frozen_year_start_pool(total_pool) if dev_basis.startswith("Start-of-Year") else total_pool
-    st.caption("Deviation below is vs. " +
-              ("a $ target frozen at each year's Jan level." if dev_basis.startswith("Start-of-Year")
-               else "target % of today's live total pool (default)."))
+    DEV_BASIS_CAPTIONS = {
+        "Live Pool % (today's total)": "target % of today's live total pool.",
+        "Start-of-Year $ Target (frozen)": "a $ target frozen at each year's Jan level.",
+        "Change Since Rebalance (own $ flow)": "this commodity's OWN $ position at the start of "
+            "the year — pure flow since the last rebalance, no target % involved, so it's zero at "
+            "every year's start by construction.",
+    }
+    st.caption("Deviation below is vs. " + DEV_BASIS_CAPTIONS[dev_basis])
+    since_rebalance = dev_basis == "Change Since Rebalance (own $ flow)"
+    lots_title = "Change in Position vs Start-of-Year (in lots)" if since_rebalance \
+        else "Over / Under vs Target Weight (in lots)"
+    var_title = "Change in Position vs Start-of-Year (in VaR $)" if since_rebalance \
+        else "Over / Under vs Target Weight (in VaR $)"
+    weekly_title = "Weekly Change vs Start-of-Year ($M)" if since_rebalance \
+        else "Weekly Deviation vs Target Weight (percentage points)"
+    if not since_rebalance:
+        total_pool_ref = frozen_year_start_pool(total_pool) if dev_basis.startswith("Start-of-Year") else total_pool
 
-    st.markdown(lbl("Over / Under vs Target Weight (in lots)"), unsafe_allow_html=True)
+    st.markdown(lbl(lots_title), unsafe_allow_html=True)
     default_sel = [c for c in GROUPS["Softs"] if c in all_commodities]
     sel_group = seg_control("Group", ["Softs", "Grains", "Oilseeds", "Livestock", "Custom"],
                             "Softs", "trend_group")
@@ -914,8 +979,11 @@ if nav == "Deviation vs Target":
     else:
         sel_commodities = [c for c in GROUPS[sel_group] if c in all_commodities]
 
-    dev_df = compute_deviation(df, pool, total_pool_ref, all_commodities, blend_ratio)
-    fig_dev = base_fig(height=420, yaxis_title="Deviation from Target Weight (lots)")
+    if since_rebalance:
+        dev_df = compute_deviation_since_rebalance(df, pool, all_commodities)
+    else:
+        dev_df = compute_deviation(df, pool, total_pool_ref, all_commodities, blend_ratio)
+    fig_dev = base_fig(height=420, yaxis_title="Lots" if since_rebalance else "Deviation from Target Weight (lots)")
     for comm in sel_commodities:
         s = dev_df[dev_df["Commodity"] == comm].set_index("Date")["Deviation Lots"]
         if not s.empty:
@@ -930,7 +998,7 @@ if nav == "Deviation vs Target":
             fig_dev.add_vline(x=_jan1, line_color="#9ca3af", line_width=1, line_dash="dot")
     st.plotly_chart(fig_dev, use_container_width=True)
 
-    st.markdown(lbl("Over / Under vs Target Weight (in VaR $)"), unsafe_allow_html=True)
+    st.markdown(lbl(var_title), unsafe_allow_html=True)
     devvar_window = seg_control("Vol Window", [20, 60, 120], 20, "devvar_window",
                                 format_func=lambda x: f"{x}D")
     daily_px_dev = load_daily_prices()
@@ -938,7 +1006,7 @@ if nav == "Deviation vs Target":
     var_df_dev = compute_index_var(df, vol_df_dev, all_commodities, devvar_window)
     dev_var_df = compute_deviation_var(dev_df, var_df_dev)
 
-    fig_dev_var = base_fig(height=420, yaxis_title="Deviation from Target Weight (VaR USD)")
+    fig_dev_var = base_fig(height=420, yaxis_title="VaR USD" if since_rebalance else "Deviation from Target Weight (VaR USD)")
     for comm in sel_commodities:
         s = dev_var_df[dev_var_df["Commodity"] == comm].set_index("Date")["Deviation VaR USD"]
         if not s.empty:
@@ -953,11 +1021,13 @@ if nav == "Deviation vs Target":
         st.markdown(build_deviation_var_table_html(dev_var_latest, GROUP_OF, COLORS, list(GROUPS.keys()), devvar_window),
                    unsafe_allow_html=True)
 
-    st.markdown(lbl("Weekly Deviation vs Target Weight (percentage points)"), unsafe_allow_html=True)
-    weekly_dev = compute_weekly_deviation_pct(df, pool, total_pool_ref, all_commodities, blend_ratio)
+    st.markdown(lbl(weekly_title), unsafe_allow_html=True)
+    weekly_dev = compute_weekly_usd_since_rebalance(pool, all_commodities) if since_rebalance \
+        else compute_weekly_deviation_pct(df, pool, total_pool_ref, all_commodities, blend_ratio)
     n_weeks = st.slider("Weeks shown", min_value=8, max_value=min(104, len(weekly_dev)),
                         value=min(52, len(weekly_dev)), step=4, key="trend_weeks")
-    st.markdown(build_weekly_deviation_html(weekly_dev.tail(n_weeks), all_commodities, GROUP_OF),
+    st.markdown(build_weekly_deviation_html(weekly_dev.tail(n_weeks), all_commodities, GROUP_OF,
+                                            fmt="usd_m" if since_rebalance else "pct"),
                unsafe_allow_html=True)
 
     with st.expander("CFTC CIT RIC reference"):
