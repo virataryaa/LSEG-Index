@@ -37,8 +37,8 @@ st.markdown("""<style>
      touches sliders/multiselects that also carry a st-key- class. */
   [class*="st-key-"] [data-testid="stButtonGroup"] { gap:0; }
   [class*="st-key-"] [data-testid="stButtonGroup"] > div {
-      display:inline-flex; gap:2px; padding:3px; background:#f1f3f7;
-      border:1px solid #e3e7ee; border-radius:999px;
+      display:inline-flex; gap:2px; padding:3px; background:#eef0f6;
+      border:none; border-radius:999px;
   }
   [class*="st-key-"] button[kind^="segmented_control"] {
       border:none !important; border-radius:999px !important; margin:0 !important;
@@ -52,9 +52,11 @@ st.markdown("""<style>
   }
   [class*="st-key-"] button[kind="segmented_control"]:hover { background:#e6e9f0 !important; }
   [class*="st-key-"] button[kind="segmented_controlActive"] {
-      background:#1a56cc !important; box-shadow:0 1px 3px rgba(0,0,0,.18) !important;
+      background:#0a2463 !important; box-shadow:none !important;
   }
   [class*="st-key-"] button[kind="segmented_controlActive"] p { color:#ffffff !important; }
+  .sb-title { font-family:'Fraunces', Georgia, serif; font-size:1.5rem; font-weight:600; color:#0a2463 !important; margin-bottom:2px; }
+  .sb-caption { font-size:11px; color:#7a86a8 !important; margin-bottom:16px; line-height:1.4; }
 </style>""", unsafe_allow_html=True)
 
 _D = dict(template="plotly_white", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
@@ -754,8 +756,7 @@ total_pool = pool.sum(axis=1, min_count=1)
 
 with st.sidebar:
     st.markdown(
-        "<h3 style='font-family:\"Playfair Display\",Georgia,serif;color:#0a2463;"
-        "font-weight:400;letter-spacing:-.01em;margin-bottom:1rem'>Index Positioning</h3>",
+        "<div class='sb-title'>Index Positioning</div><div class='sb-caption'>Index fund positioning and rebalance monitor.</div>",
         unsafe_allow_html=True,
     )
     st.markdown(f"*Data through {max_date.strftime('%d %b %Y')}*")
